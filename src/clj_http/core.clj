@@ -5,6 +5,7 @@
                             HttpResponse Header HttpHost)
            (org.apache.http.util EntityUtils)
            (org.apache.http.entity ByteArrayEntity)
+           (org.apache.http.entity.mime MultipartEntity)
            (org.apache.http.client HttpClient)
            (org.apache.http.client.methods HttpGet HttpHead HttpPut
                                            HttpPost HttpDelete
@@ -37,7 +38,7 @@
    the clj-http uses ByteArrays for the bodies."
   [{:keys [request-method scheme server-name server-port uri query-string
            headers content-type character-encoding body socket-timeout
-           conn-timeout]}]
+           conn-timeout multipart]}]
   (let [http-client (DefaultHttpClient.)]
     (try
       (doto http-client
@@ -73,9 +74,14 @@
         (.addHeader http-req "Connection" "close")
         (doseq [[header-n header-v] headers]
           (.addHeader http-req header-n header-v))
-        (if body
-          (let [http-body (ByteArrayEntity. body)]
-            (.setEntity #^HttpEntityEnclosingRequest http-req http-body)))
+        (if multipart
+          (let [mp-entity (MultipartEntity.)]
+            (doseq [[k v] multipart]
+              (.addPart mp-entity (name k) v))
+            (.setEntity #^HttpEntityEnclosingRequest http-req mp-entity))
+          (if body
+           (let [http-body (ByteArrayEntity. body)]
+             (.setEntity #^HttpEntityEnclosingRequest http-req http-body))))
         (let [http-resp (.execute http-client http-req)
               http-entity (.getEntity http-resp)
               resp {:status (.getStatusCode (.getStatusLine http-resp))
