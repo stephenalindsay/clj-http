@@ -1,12 +1,16 @@
 (ns clj-http.core
   "Core HTTP request/response implementation."
-  (:import (java.net URI)
+  (:import (java.io File InputStream)
+           (java.net URI)
            (org.apache.http HttpRequest HttpEntityEnclosingRequest
                             HttpResponse Header HttpHost)
            (org.apache.http.util EntityUtils)
            (org.apache.http.entity ByteArrayEntity)
            (org.apache.http.entity.mime MultipartEntity)
-           (org.apache.http.entity.mime.content ByteArrayBody)
+           (org.apache.http.entity.mime.content ByteArrayBody
+                                                FileBody
+                                                InputStreamBody
+                                                StringBody)
            (org.apache.http.client HttpClient)
            (org.apache.http.client.methods HttpGet HttpHead HttpPut
                                            HttpPost HttpDelete
@@ -20,7 +24,7 @@
                 (iterator-seq (.headerIterator http-resp)))))
 
 (defn- set-client-param [#^HttpClient client key val]
-  (when (not (nil? val)) 
+  (when (not (nil? val))
     (-> client
         (.getParams)
         (.setParameter key val))))
@@ -30,6 +34,29 @@
               (getMethod [] "DELETE"))]
     (.setURI res (URI. url))
     res))
+
+(defn- create-multipart-entity
+  "Takes a multipart map and creates a MultipartEntity with each key/val pair
+   added as a part, determining part type by the val type."
+  [multipart]
+  (let [mp-entity (MultipartEntity.)]
+    (doseq [[k v] multipart]
+      (let [klass (type v)
+            filename (name k)
+            part (cond
+                  (= klass File)
+                  (FileBody. v filename)
+
+                  (= klass InputStream)
+                  (InputStreamBody. v filename)
+
+                  (= klass (type (byte-array 0)))
+                  (ByteArrayBody. v filename)
+
+                  (= klass String)
+                  (StringBody. v))]
+        (.addPart mp-entity filename part)))
+    mp-entity))
 
 (defn request
   "Executes the HTTP request corresponding to the given Ring request map and
@@ -50,7 +77,7 @@
                                                      (Integer. socket-timeout)))
         (set-client-param "http.connection.timeout" (and conn-timeout
                                                          (Integer. conn-timeout))))
-      (if (nil? (#{"localhost" "127.0.0.1"} server-name))
+      (when-not (#{"localhost" "127.0.0.1"} server-name)
         (when-let [proxy-host (System/getProperty (str scheme ".proxyHost"))]
           (let [proxy-port (Integer/parseInt
                             (System/getProperty (str scheme ".proxyPort")))]
@@ -76,13 +103,11 @@
         (doseq [[header-n header-v] headers]
           (.addHeader http-req header-n header-v))
         (if multipart
-          (let [mp-entity (MultipartEntity.)]
-            (doseq [[k v] multipart]
-              (.addPart mp-entity (name k) (ByteArrayBody. v (name k))))
-            (.setEntity #^HttpEntityEnclosingRequest http-req mp-entity))
+          (.setEntity #^HttpEntityEnclosingRequest http-req
+                      (create-multipart-entity multipart))
           (if body
-           (let [http-body (ByteArrayEntity. body)]
-             (.setEntity #^HttpEntityEnclosingRequest http-req http-body))))
+            (let [http-body (ByteArrayEntity. body)]
+              (.setEntity #^HttpEntityEnclosingRequest http-req http-body))))
         (let [http-resp (.execute http-client http-req)
               http-entity (.getEntity http-resp)
               resp {:status (.getStatusCode (.getStatusLine http-resp))
