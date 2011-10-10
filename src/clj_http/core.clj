@@ -66,53 +66,52 @@
    the clj-http uses ByteArrays for the bodies."
   [{:keys [request-method scheme server-name server-port uri query-string
            headers content-type character-encoding body socket-timeout
-           conn-timeout multipart]}]
+           conn-timeout multipart] :as req}]
   (let [http-client (DefaultHttpClient.)]
-    (try
-      (doto http-client
-        (set-client-param ClientPNames/COOKIE_POLICY
-                          CookiePolicy/BROWSER_COMPATIBILITY)
-        (set-client-param ClientPNames/HANDLE_REDIRECTS false)
-        (set-client-param "http.socket.timeout" (and socket-timeout
-                                                     (Integer. socket-timeout)))
-        (set-client-param "http.connection.timeout" (and conn-timeout
-                                                         (Integer. conn-timeout))))
-      (when-not (#{"localhost" "127.0.0.1"} server-name)
-        (when-let [proxy-host (System/getProperty (str scheme ".proxyHost"))]
-          (let [proxy-port (Integer/parseInt
-                            (System/getProperty (str scheme ".proxyPort")))]
-            (set-client-param http-client ConnRoutePNames/DEFAULT_PROXY
-                              (HttpHost. proxy-host proxy-port)))))
-      (let [http-url (str scheme "://" server-name
-                          (if server-port (str ":" server-port))
-                          uri
-                          (if query-string (str "?" query-string)))
-            #^HttpRequest
-            http-req (case request-method
-                       :get    (HttpGet. http-url)
-                       :head   (HttpHead. http-url)
-                       :put    (HttpPut. http-url)
-                       :post   (HttpPost. http-url)
-                       :delete (proxy-delete-with-body http-url))]
-        (if (and content-type character-encoding)
-          (.addHeader http-req "Content-Type"
-                      (str content-type "; charset=" character-encoding)))
-        (if (and content-type (not character-encoding))
-          (.addHeader http-req "Content-Type" content-type))
-        (.addHeader http-req "Connection" "close")
-        (doseq [[header-n header-v] headers]
-          (.addHeader http-req header-n header-v))
-        (if multipart
-          (.setEntity #^HttpEntityEnclosingRequest http-req
-                      (create-multipart-entity multipart))
-          (if body
-            (let [http-body (ByteArrayEntity. body)]
-              (.setEntity #^HttpEntityEnclosingRequest http-req http-body))))
-        (let [http-resp (.execute http-client http-req)
-              http-entity (.getEntity http-resp)
-              resp {:status (.getStatusCode (.getStatusLine http-resp))
-                    :headers (parse-headers http-resp)
-                    :body (when http-entity
-                            (EntityUtils/toByteArray http-entity))}]
-          (.shutdown (.getConnectionManager http-client))
-          resp)))))
+    (doto http-client
+      (set-client-param ClientPNames/COOKIE_POLICY
+                        CookiePolicy/BROWSER_COMPATIBILITY)
+      (set-client-param ClientPNames/HANDLE_REDIRECTS false)
+      (set-client-param "http.socket.timeout"
+                        (and socket-timeout (Integer. socket-timeout)))
+      (set-client-param "http.connection.timeout"
+                        (and conn-timeout (Integer. conn-timeout))))
+    (when-not (#{"localhost" "127.0.0.1"} server-name)
+      (when-let [proxy-host (System/getProperty (str scheme ".proxyHost"))]
+        (let [proxy-port (Integer/parseInt
+                          (System/getProperty (str scheme ".proxyPort")))]
+          (set-client-param http-client ConnRoutePNames/DEFAULT_PROXY
+                            (HttpHost. proxy-host proxy-port)))))
+    (let [http-url (str scheme "://" server-name
+                        (if server-port (str ":" server-port))
+                        uri
+                        (if query-string (str "?" query-string)))
+          #^HttpRequest
+          http-req (case request-method
+                     :get    (HttpGet. http-url)
+                     :head   (HttpHead. http-url)
+                     :put    (HttpPut. http-url)
+                     :post   (HttpPost. http-url)
+                     :delete (proxy-delete-with-body http-url))]
+      (when (and content-type character-encoding)
+        (.addHeader http-req "Content-Type"
+                    (str content-type "; charset=" character-encoding)))
+      (when (and content-type (not character-encoding))
+        (.addHeader http-req "Content-Type" content-type))
+      (.addHeader http-req "Connection" "close")
+      (doseq [[header-n header-v] headers]
+        (.addHeader http-req header-n header-v))
+      (if multipart
+        (.setEntity #^HttpEntityEnclosingRequest http-req
+                    (create-multipart-entity multipart))
+        (when body
+          (let [http-body (ByteArrayEntity. body)]
+            (.setEntity #^HttpEntityEnclosingRequest http-req http-body))))
+      (let [http-resp (.execute http-client http-req)
+            http-entity (.getEntity http-resp)
+            resp {:status (.getStatusCode (.getStatusLine http-resp))
+                  :headers (parse-headers http-resp)
+                  :body (when http-entity
+                          (EntityUtils/toByteArray http-entity))}]
+        (.shutdown (.getConnectionManager http-client))
+        resp))))
